@@ -1,0 +1,54 @@
+name: One Piece TCG Sniper
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # Polls every 5 minutes, 24/7
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Send a test notification to my phone right now?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  contents: write
+
+jobs:
+  check_stock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Chrome TLS impersonator
+        run: pip install curl_cffi
+
+      - name: Run stock monitor
+        env:
+          TEST_MODE: ${{ github.event.inputs.test_mode }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python monitor.py
+
+      - name: Commit updated stock state (and prevent 60-day sleep)
+        run: |
+          git config user.name "stock-bot"
+          git config user.email "stock-bot@users.noreply.github.com"
+          
+          # Keep-alive heartbeat on the 1st of every month at 00:00 UTC so GitHub never pauses the cron
+          if [ "$(date +%d)" = "01" ] && [ "$(date +%H)" = "00" ]; then
+            date -u > .heartbeat
+            git add .heartbeat
+          fi
+          
+          git add state.json
+          git diff --staged --quiet || (git commit -m "Update stock state [skip ci]" && git push)
