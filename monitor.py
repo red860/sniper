@@ -7,22 +7,31 @@ import urllib.request
 from pathlib import Path
 from curl_cffi import requests as cffi_requests
 
-# --- 1. FUTURE-PROOF FILTER CONFIGURATION ---
-# Matches OP-18 to OP-29, EB-05 to EB-09, PRB-03 to PRB-09, PEB-01 to PEB-09, and official set names
-SET_PATTERN = re.compile(
+# --- 1A. ONE PIECE FILTER CONFIGURATION ---
+OP_SET_PATTERN = re.compile(
     r"\b(op[- ]?(1[89]|2\d)|eb[- ]?0[5-9]|prb[- ]?0[3-9]|peb[- ]?0[1-9]|dominance of god|come in,? world|east blue)\b",
     re.IGNORECASE,
 )
+OP_REQUIRED = ["booster", "box", "display"]
+OP_MIN_GBP = 80.00
+OP_MAX_GBP = 130.00
 
-REQUIRED_KEYWORDS = ["booster", "box", "display"]
+# --- 1B. POKEMON FILTER CONFIGURATION (High-Value Sets + Future ME06-ME19 Codes) ---
+PKMN_SET_PATTERN = re.compile(
+    r"\b(me[- ]?(0[5-9]|1\d)|sv[- ]?(08\.5|09|10)|30th celebration|delta reign|flowing fists|pitch black|chaos rising|perfect order|ascended heroes|prismatic evolutions|destined rivals|surging sparks)\b",
+    re.IGNORECASE,
+)
+PKMN_REQUIRED = ["booster box", "booster display", "elite trainer box", "etb", "pokemon center"]
+PKMN_MIN_GBP = 38.00   # Catches £40-£55 ETBs while ignoring £20 tins/collections
+PKMN_MAX_GBP = 145.00  # Catches £105-£135 Booster Boxes while ignoring scalped prices
+
+# Shared exclusions for both games
 EXCLUDED_KEYWORDS = [
     "sleeve", "binder", "case", "starter", "double pack", "double",
-    "single", "blister", "japanese", "jp", "playmat", "deck",
-    "empty", "damaged", "1x", "3x", "pack (", "gift", "tin", "illustration"
+    "single", "blister", "japanese", "jp", "korean", "playmat", "deck",
+    "empty", "damaged", "1x", "3x", "pack (", "gift", "tin", "illustration",
+    "collection box", "ex box", "vstar", "figure", "plush", "mini tin"
 ]
-
-MIN_PRICE_GBP = 75.00   # Filters out Japanese boxes (£45-£55) and loose packs
-MAX_PRICE_GBP = 125.00  # Filters out scalped secondary-wave listings
 
 # --- 2. VERIFIED HIGH-TRUST UK SHOPIFY STORES (8.2/10+ ONLY) ---
 SHOPIFY_STORES = {
@@ -67,12 +76,23 @@ def save_state(state: dict):
     STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def matches_criteria(product_title: str, variant_title: str = "") -> bool:
+def classify_match(product_title: str, variant_title: str, price: float) -> str | None:
+    """Returns 'ONE PIECE' or 'POKEMON' if title & price match criteria, else None."""
     full_title = f"{product_title} {variant_title}".lower()
-    has_set = bool(SET_PATTERN.search(full_title))
-    has_box = any(k in full_title for k in REQUIRED_KEYWORDS)
-    has_excluded = any(x in full_title for x in EXCLUDED_KEYWORDS)
-    return has_set and has_box and not has_excluded
+    if any(x in full_title for x in EXCLUDED_KEYWORDS):
+        return None
+
+    # 1. Check One Piece first
+    if OP_SET_PATTERN.search(full_title) and any(k in full_title for k in OP_REQUIRED):
+        if OP_MIN_GBP <= price <= OP_MAX_GBP:
+            return "ONE PIECE"
+
+    # 2. Check Pokemon in memory (0ms extra network cost)
+    if PKMN_SET_PATTERN.search(full_title) and any(k in full_title for k in PKMN_REQUIRED):
+        if PKMN_MIN_GBP <= price <= PKMN_MAX_GBP:
+            return "POKEMON"
+
+    return None
 
 
 def send_alert(title: str, body: str, click_url: str):
@@ -122,25 +142,23 @@ def check_shopify_stores(state: dict) -> bool:
                 if v_title == "Default Title":
                     v_title = ""
 
-                if not matches_criteria(p_title, v_title):
-                    continue
-
                 is_available = bool(variant.get("available", False))
                 try:
                     price = float(variant.get("price", 999.99))
                 except (ValueError, TypeError):
                     continue
 
+                game_tag = classify_match(p_title, v_title, price)
                 was_available = state.get(v_id, False)
 
-                if is_available and MIN_PRICE_GBP <= price <= MAX_PRICE_GBP:
+                if is_available and game_tag:
                     if not was_available:
                         cart_1x = f"{base_url}/cart/{v_id}:1"
                         cart_2x = f"{base_url}/cart/{v_id}:2"
                         product_page = f"{base_url}/products/{handle}"
 
                         full_name = f"{p_title} ({v_title})".strip(" ()")
-                        alert_title = f"DROP: {store_name} - £{price:.2f}"
+                        alert_title = f"[{game_tag}] {store_name} - £{price:.2f}"
                         alert_body = (
                             f"{full_name}\n"
                             f"1-Box Instant Cart: {cart_1x}\n"
@@ -176,9 +194,6 @@ def check_woo_stores(state: dict) -> bool:
 
         for p in products:
             title = p.get("name", "")
-            if not matches_criteria(title):
-                continue
-
             v_id = f"woo_{p.get('id')}"
             is_available = bool(p.get("is_in_stock", False) and p.get("is_purchasable", False))
 
@@ -189,12 +204,14 @@ def check_woo_stores(state: dict) -> bool:
             except (ValueError, TypeError):
                 continue
 
+            game_tag = classify_match(title, "", price)
             was_available = state.get(v_id, False)
-            if is_available and MIN_PRICE_GBP <= price <= MAX_PRICE_GBP:
+
+            if is_available and game_tag:
                 if not was_available:
                     cart_1x = f"{base_url}/?add-to-cart={p.get('id')}&quantity=1"
                     cart_2x = f"{base_url}/?add-to-cart={p.get('id')}&quantity=2"
-                    alert_title = f"DROP: {store_name} - £{price:.2f}"
+                    alert_title = f"[{game_tag}] {store_name} - £{price:.2f}"
                     alert_body = (
                         f"{title}\n"
                         f"1-Box Instant Cart: {cart_1x}\n"
@@ -249,9 +266,6 @@ def check_custom_stores(state: dict) -> bool:
 
             for item in items:
                 title = item.get("name", "")
-                if not matches_criteria(title):
-                    continue
-
                 offers = item.get("offers", {})
                 if isinstance(offers, list):
                     offers = offers[0] if offers else {}
@@ -263,13 +277,14 @@ def check_custom_stores(state: dict) -> bool:
                 except (ValueError, TypeError):
                     continue
 
+                game_tag = classify_match(title, "", price)
                 prod_url = offers.get("url") or item.get("url") or url
                 v_id = f"custom_{store_name}_{re.sub(r'[^a-z0-9]', '', title.lower())}"
                 was_available = state.get(v_id, False)
 
-                if is_available and MIN_PRICE_GBP <= price <= MAX_PRICE_GBP:
+                if is_available and game_tag:
                     if not was_available:
-                        alert_title = f"DROP: {store_name} - £{price:.2f}"
+                        alert_title = f"[{game_tag}] {store_name} - £{price:.2f}"
                         alert_body = f"{title}\nBuy Now: {prod_url}"
                         print(f"[ALERT FIRED] {alert_title} | {title}")
                         send_alert(alert_title, alert_body, prod_url)
@@ -284,25 +299,23 @@ def check_custom_stores(state: dict) -> bool:
 
 
 def run_all_checks():
-    # Manual single test mode from GitHub UI
     if os.getenv("TEST_MODE") == "true":
         send_alert(
-            "TEST: One Piece Sniper Active",
-            "Continuous 60-Second Loop Activated.\n1-Tap Test: https://www.bulwarkgames.co.uk",
+            "TEST: Dual Sniper Active (OP + PKMN)",
+            "Scanning 15 UK Stores every 60s.\n1-Tap Test: https://www.bulwarkgames.co.uk",
             "https://www.bulwarkgames.co.uk",
         )
         print("Sent test alert successfully.")
         return
 
-    # In-memory loop: runs for 25 minutes (1,500s) before clean exit
     start_time = time.time()
-    loop_duration_sec = 25 * 60  
+    loop_duration_sec = 25 * 60
     iteration = 1
 
     state = load_state()
     any_change_across_session = False
 
-    print("=== Starting 25-Minute Continuous Loop ===")
+    print("=== Starting 25-Minute Continuous Loop (One Piece + Pokemon) ===")
 
     while (time.time() - start_time) < loop_duration_sec:
         print(f"\n--- [Sweep #{iteration}] Elapsed: {int(time.time() - start_time)}s ---")
@@ -320,7 +333,6 @@ def run_all_checks():
             any_change_across_session = True
 
         iteration += 1
-        # Sleep ~55 to 65 seconds before the next sweep
         time.sleep(random.uniform(55, 65))
 
     print("\n=== 25-Minute Session Complete. Passing off to next scheduled runner. ===")
