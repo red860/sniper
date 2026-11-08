@@ -2,7 +2,8 @@ name: One Piece TCG Sniper
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # Polls every 5 minutes, 24/7
+    # Runs at :00 and :30 between 08:00 and 21:30 UTC every day
+    - cron: '0,30 8-21 * * *'
   workflow_dispatch:
     inputs:
       test_mode:
@@ -19,33 +20,33 @@ permissions:
 
 jobs:
   check_stock:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: ubuntu-24.04
+    timeout-minutes: 32
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: '3.13'
 
       - name: Install Chrome TLS impersonator
         run: pip install curl_cffi
 
-      - name: Run stock monitor
+      - name: Run stock monitor (25-minute loop)
         env:
           TEST_MODE: ${{ github.event.inputs.test_mode }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python monitor.py
 
-      - name: Commit updated stock state (and prevent 60-day sleep)
+      - name: Commit updated stock state
         run: |
           git config user.name "stock-bot"
           git config user.email "stock-bot@users.noreply.github.com"
           
-          # Keep-alive heartbeat on the 1st of every month at 00:00 UTC so GitHub never pauses the cron
-          if [ "$(date +%d)" = "01" ] && [ "$(date +%H)" = "00" ]; then
+          # Heartbeat keep-alive so GitHub never sleeps the repo
+          if [ "$(date +%d)" = "01" ] && [ "$(date +%H)" = "08" ]; then
             date -u > .heartbeat
             git add .heartbeat
           fi

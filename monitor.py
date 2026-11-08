@@ -8,7 +8,7 @@ from pathlib import Path
 from curl_cffi import requests as cffi_requests
 
 # --- 1. FUTURE-PROOF FILTER CONFIGURATION ---
-# Matches OP-18 to OP-29, EB-05 to EB-09, PRB-03 to PRB-09, PEB-01 to PEB-09, and set names
+# Matches OP-18 to OP-29, EB-05 to EB-09, PRB-03 to PRB-09, PEB-01 to PEB-09, and official set names
 SET_PATTERN = re.compile(
     r"\b(op[- ]?(1[89]|2\d)|eb[- ]?0[5-9]|prb[- ]?0[3-9]|peb[- ]?0[1-9]|dominance of god|come in,? world|east blue)\b",
     re.IGNORECASE,
@@ -21,8 +21,8 @@ EXCLUDED_KEYWORDS = [
     "empty", "damaged", "1x", "3x", "pack (", "gift", "tin", "illustration"
 ]
 
-MIN_PRICE_GBP = 80.00   # Filters out Japanese boxes (£45-£55) and loose packs
-MAX_PRICE_GBP = 130.00  # Filters out scalped secondary-wave listings
+MIN_PRICE_GBP = 75.00   # Filters out Japanese boxes (£45-£55) and loose packs
+MAX_PRICE_GBP = 125.00  # Filters out scalped secondary-wave listings
 
 # --- 2. VERIFIED HIGH-TRUST UK SHOPIFY STORES (8.2/10+ ONLY) ---
 SHOPIFY_STORES = {
@@ -156,7 +156,7 @@ def check_shopify_stores(state: dict) -> bool:
                     state[v_id] = False
                     changed = True
 
-        time.sleep(random.uniform(1.2, 2.5))
+        time.sleep(random.uniform(0.8, 1.8))
     return changed
 
 
@@ -209,7 +209,7 @@ def check_woo_stores(state: dict) -> bool:
                 state[v_id] = False
                 changed = True
 
-        time.sleep(random.uniform(1.2, 2.5))
+        time.sleep(random.uniform(0.8, 1.8))
     return changed
 
 
@@ -279,31 +279,52 @@ def check_custom_stores(state: dict) -> bool:
                     state[v_id] = False
                     changed = True
 
-        time.sleep(random.uniform(1.5, 3.0))
+        time.sleep(random.uniform(1.0, 2.0))
     return changed
 
 
 def run_all_checks():
+    # Manual single test mode from GitHub UI
     if os.getenv("TEST_MODE") == "true":
         send_alert(
             "TEST: One Piece Sniper Active",
-            "All 15 High-Trust UK Stores Connected.\n1-Tap Test: https://www.bulwarkgames.co.uk",
+            "Continuous 60-Second Loop Activated.\n1-Tap Test: https://www.bulwarkgames.co.uk",
             "https://www.bulwarkgames.co.uk",
         )
         print("Sent test alert successfully.")
         return
 
+    # In-memory loop: runs for 25 minutes (1,500s) before clean exit
+    start_time = time.time()
+    loop_duration_sec = 25 * 60  
+    iteration = 1
+
     state = load_state()
-    changed = False
+    any_change_across_session = False
 
-    if check_shopify_stores(state):
-        changed = True
-    if check_woo_stores(state):
-        changed = True
-    if check_custom_stores(state):
-        changed = True
+    print("=== Starting 25-Minute Continuous Loop ===")
 
-    if changed:
+    while (time.time() - start_time) < loop_duration_sec:
+        print(f"\n--- [Sweep #{iteration}] Elapsed: {int(time.time() - start_time)}s ---")
+        cycle_changed = False
+
+        if check_shopify_stores(state):
+            cycle_changed = True
+        if check_woo_stores(state):
+            cycle_changed = True
+        if check_custom_stores(state):
+            cycle_changed = True
+
+        if cycle_changed:
+            save_state(state)
+            any_change_across_session = True
+
+        iteration += 1
+        # Sleep ~55 to 65 seconds before the next sweep
+        time.sleep(random.uniform(55, 65))
+
+    print("\n=== 25-Minute Session Complete. Passing off to next scheduled runner. ===")
+    if any_change_across_session:
         save_state(state)
 
 
