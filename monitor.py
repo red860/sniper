@@ -13,17 +13,22 @@ OP_SET_PATTERN = re.compile(
     re.IGNORECASE,
 )
 OP_REQUIRED = ["booster", "box", "display"]
-OP_MIN_GBP = 80.00
-OP_MAX_GBP = 130.00
+OP_MIN_GBP = 75.00
+OP_MAX_GBP = 125.00
 
-# --- 1B. POKEMON FILTER CONFIGURATION (High-Value Sets + Future ME06-ME19 Codes) ---
+# --- 1B. POKEMON FILTER CONFIGURATION (Split Caps for ETBs vs Booster Boxes) ---
 PKMN_SET_PATTERN = re.compile(
     r"\b(me[- ]?(0[5-9]|1\d)|sv[- ]?(08\.5|09|10)|30th celebration|delta reign|flowing fists|pitch black|chaos rising|perfect order|ascended heroes|prismatic evolutions|destined rivals|surging sparks)\b",
     re.IGNORECASE,
 )
-PKMN_REQUIRED = ["booster box", "booster display", "elite trainer box", "etb", "pokemon center"]
-PKMN_MIN_GBP = 38.00   # Catches £40-£55 ETBs while ignoring £20 tins/collections
-PKMN_MAX_GBP = 145.00  # Catches £105-£135 Booster Boxes while ignoring scalped prices
+
+PKMN_BOX_KEYWORDS = ["booster box", "booster display"]
+PKMN_BOX_MIN_GBP = 80.00
+PKMN_BOX_MAX_GBP = 135.00  # 36-pack Booster Boxes RRP ~£105-£125
+
+PKMN_ETB_KEYWORDS = ["elite trainer box", "etb"]
+PKMN_ETB_MIN_GBP = 35.00
+PKMN_ETB_MAX_GBP = 58.00   # Standard ETB RRP £49.99 (PC Exclusive £56.99) - blocks scalped £134 listings!
 
 # Shared exclusions for both games
 EXCLUDED_KEYWORDS = [
@@ -77,20 +82,24 @@ def save_state(state: dict):
 
 
 def classify_match(product_title: str, variant_title: str, price: float) -> str | None:
-    """Returns 'ONE PIECE' or 'POKEMON' if title & price match criteria, else None."""
+    """Returns tag ('ONE PIECE', 'PKMN BOX', or 'PKMN ETB') if criteria met, else None."""
     full_title = f"{product_title} {variant_title}".lower()
     if any(x in full_title for x in EXCLUDED_KEYWORDS):
         return None
 
-    # 1. Check One Piece first
+    # 1. Check One Piece Booster Boxes (£75 - £125)
     if OP_SET_PATTERN.search(full_title) and any(k in full_title for k in OP_REQUIRED):
         if OP_MIN_GBP <= price <= OP_MAX_GBP:
             return "ONE PIECE"
 
-    # 2. Check Pokemon in memory (0ms extra network cost)
-    if PKMN_SET_PATTERN.search(full_title) and any(k in full_title for k in PKMN_REQUIRED):
-        if PKMN_MIN_GBP <= price <= PKMN_MAX_GBP:
-            return "POKEMON"
+    # 2. Check Pokemon (Split by Booster Box vs ETB)
+    if PKMN_SET_PATTERN.search(full_title):
+        if any(k in full_title for k in PKMN_BOX_KEYWORDS):
+            if PKMN_BOX_MIN_GBP <= price <= PKMN_BOX_MAX_GBP:
+                return "PKMN BOX"
+        elif any(k in full_title for k in PKMN_ETB_KEYWORDS):
+            if PKMN_ETB_MIN_GBP <= price <= PKMN_ETB_MAX_GBP:
+                return "PKMN ETB"
 
     return None
 
@@ -302,7 +311,7 @@ def run_all_checks():
     if os.getenv("TEST_MODE") == "true":
         send_alert(
             "TEST: Dual Sniper Active (OP + PKMN)",
-            "Scanning 15 UK Stores every 60s.\n1-Tap Test: https://www.bulwarkgames.co.uk",
+            "Scanning 15 UK Stores every 60s (Split ETB Caps Active).\n1-Tap Test: https://www.bulwarkgames.co.uk",
             "https://www.bulwarkgames.co.uk",
         )
         print("Sent test alert successfully.")
@@ -315,7 +324,7 @@ def run_all_checks():
     state = load_state()
     any_change_across_session = False
 
-    print("=== Starting 25-Minute Continuous Loop (One Piece + Pokemon) ===")
+    print("=== Starting 28-Minute Continuous Loop (One Piece + Pokemon) ===")
 
     while (time.time() - start_time) < loop_duration_sec:
         print(f"\n--- [Sweep #{iteration}] Elapsed: {int(time.time() - start_time)}s ---")
@@ -335,7 +344,7 @@ def run_all_checks():
         iteration += 1
         time.sleep(random.uniform(55, 65))
 
-    print("\n=== 25-Minute Session Complete. Passing off to next scheduled runner. ===")
+    print("\n=== 28-Minute Session Complete. Passing off to next scheduled runner. ===")
     if any_change_across_session:
         save_state(state)
 
