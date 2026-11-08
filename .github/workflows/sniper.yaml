@@ -2,8 +2,8 @@ name: One Piece TCG Sniper
 
 on:
   schedule:
-    # Runs at :00 and :30 between 08:00 and 21:30 UTC every day
-    - cron: '0,30 8-21 * * *'
+    # Fires on off-peak odd minutes (:07, :27, :47) to dodge GitHub's :00/:30 server traffic jam
+    - cron: '7,27,47 8-21 * * *'
   workflow_dispatch:
     inputs:
       test_mode:
@@ -15,13 +15,18 @@ on:
           - 'false'
           - 'true'
 
+# Ensures only 1 scanner runs at a time, while holding the next runner at the door for an instant 0-second handoff
+concurrency:
+  group: tcg-sniper-queue
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
   check_stock:
     runs-on: ubuntu-24.04
-    timeout-minutes: 32
+    timeout-minutes: 35
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -34,7 +39,10 @@ jobs:
       - name: Install Chrome TLS impersonator
         run: pip install curl_cffi
 
-      - name: Run stock monitor (25-minute loop)
+      - name: Pull latest state right before scanning
+        run: git pull --rebase origin main || true
+
+      - name: Run stock monitor (28-minute loop)
         env:
           TEST_MODE: ${{ github.event.inputs.test_mode }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
@@ -45,11 +53,10 @@ jobs:
           git config user.name "stock-bot"
           git config user.email "stock-bot@users.noreply.github.com"
           
-          # Heartbeat keep-alive so GitHub never sleeps the repo
           if [ "$(date +%d)" = "01" ] && [ "$(date +%H)" = "08" ]; then
             date -u > .heartbeat
             git add .heartbeat
           fi
           
           git add state.json
-          git diff --staged --quiet || (git commit -m "Update stock state [skip ci]" && git push)
+          git diff --staged --quiet || (git commit -m "Update stock state [skip ci]" && git pull --rebase origin main && git push)

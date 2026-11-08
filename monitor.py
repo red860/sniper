@@ -309,7 +309,7 @@ def run_all_checks():
         return
 
     start_time = time.time()
-    loop_duration_sec = 25 * 60
+    loop_duration_sec = 28 * 60
     iteration = 1
 
     state = load_state()
