@@ -1,9 +1,6 @@
 name: One Piece TCG Sniper
 
 on:
-  schedule:
-    # Fires on off-peak odd minutes (:07, :27, :47) to dodge GitHub's :00/:30 server traffic jam
-    - cron: '7,27,47 8-21 * * *'
   workflow_dispatch:
     inputs:
       test_mode:
@@ -15,7 +12,6 @@ on:
           - 'false'
           - 'true'
 
-# Ensures only 1 scanner runs at a time, while holding the next runner at the door for an instant 0-second handoff
 concurrency:
   group: tcg-sniper-queue
   cancel-in-progress: false
@@ -52,11 +48,5 @@ jobs:
         run: |
           git config user.name "stock-bot"
           git config user.email "stock-bot@users.noreply.github.com"
-          
-          if [ "$(date +%d)" = "01" ] && [ "$(date +%H)" = "08" ]; then
-            date -u > .heartbeat
-            git add .heartbeat
-          fi
-          
           git add state.json
           git diff --staged --quiet || (git commit -m "Update stock state [skip ci]" && git pull --rebase origin main && git push)
