@@ -139,7 +139,7 @@ def send_alert(title: str, body: str, click_url: str):
                 "url": click_url,       # Opens 1-tap Shopify cart link in Safari
                 "level": "critical",    # Bypasses iPhone Silent Mode & Focus/DND
                 "volume": 8,            # Plays at 80% volume (scale 1-10)
-                "sound": "alarm",       # Change to bell, horn, minuet, telegraph, etc. if preferred
+                "sound": "sherwoodforest",       # Change to bell, horn, minuet, telegraph, etc. if preferred
                 "group": "TCG Sniper",
             }).encode("utf-8")
             bark_req = urllib.request.Request(
