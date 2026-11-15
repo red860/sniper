@@ -9,12 +9,12 @@ from curl_cffi import requests as cffi_requests
 
 # --- 1A. ONE PIECE FILTER CONFIGURATION ---
 OP_SET_PATTERN = re.compile(
-    r"\b(op[- ]?(1[89]|2\d)|eb[- ]?0[5-9]|prb[- ]?0[3-9]|peb[- ]?0[1-9]|dominance of god|come in,? world|east blue)\b",
+    r"\b(op[- ]?(1[789]|2\d)|eb[- ]?0[5-9]|prb[- ]?0[3-9]|peb[- ]?0[1-9]|dominance of god|come in,? world|east blue)\b",
     re.IGNORECASE,
 )
 OP_REQUIRED = ["booster", "box", "display"]
 OP_MIN_GBP = 75.00
-OP_MAX_GBP = 125.00
+OP_MAX_GBP = 130.00
 
 # --- 1B. POKEMON FILTER CONFIGURATION (Split Caps for ETBs vs Booster Boxes) ---
 PKMN_SET_PATTERN = re.compile(
@@ -40,13 +40,18 @@ EXCLUDED_KEYWORDS = [
 
 # --- 2. VERIFIED HIGH-TRUST UK SHOPIFY STORES (8.2/10+ ONLY) ---
 SHOPIFY_STORES = {
+    "Travelling Man (9.9/10)": "https://travellingman.com",
     "Beanie Games (9.8/10)": "https://beaniegames.co.uk",
     "Goblin Gaming - Northwich (9.7/10)": "https://www.goblingaming.co.uk",
+    "TGC Collectables (9.6/10)": "https://collect.thegamecollection.net",
     "JustPlay - Liverpool (9.5/10)": "https://justplaygames.uk",
     "Double Sleeved (9.4/10)": "https://www.doublesleeved.co.uk",
+    "Chief Cards (9.4/10)": "https://www.chiefcards.co.uk",
     "The Card Vault (9.3/10)": "https://thecardvault.co.uk",
     "Gathering Games (9.2/10)": "https://gatheringgames.co.uk",
+    "Collectors Edge (9.1/10)": "https://collectorsedge.co.uk",
     "Bulwark Games - Wirral (9.0/10)": "https://www.bulwarkgames.co.uk",
+    "Card Goblin (8.9/10)": "https://www.cardgoblin.shop",
     "Obsidia TCG (8.8/10)": "https://obsidia-tcg.store",
     "Sports Cards Direct (8.5/10)": "https://www.sportscardsdirect.co.uk",
     "7th City Collectables (8.2/10)": "https://7thcitycollectables.com",
