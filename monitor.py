@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 from curl_cffi import requests as cffi_requests
 
-# --- 1A. ONE PIECE FILTER CONFIGURATION ---
+# --- 1A. ONE PIECE FILTER CONFIGURATION (OP-17 Reprint Watch + OP-18 to OP-29+) ---
 OP_SET_PATTERN = re.compile(
     r"\b(op[- ]?(1[789]|2\d)|eb[- ]?0[5-9]|prb[- ]?0[3-9]|peb[- ]?0[1-9]|dominance of god|come in,? world|east blue)\b",
     re.IGNORECASE,
@@ -38,7 +38,7 @@ EXCLUDED_KEYWORDS = [
     "collection box", "ex box", "vstar", "figure", "plush", "mini tin"
 ]
 
-# --- 2. VERIFIED HIGH-TRUST UK SHOPIFY STORES (8.2/10+ ONLY) ---
+# --- 2. VERIFIED HIGH-TRUST UK SHOPIFY STORES (15 NATIONWIDE RETAILERS) ---
 SHOPIFY_STORES = {
     "Travelling Man (9.9/10)": "https://travellingman.com",
     "Beanie Games (9.8/10)": "https://beaniegames.co.uk",
@@ -110,26 +110,50 @@ def classify_match(product_title: str, variant_title: str, price: float) -> str 
 
 
 def send_alert(title: str, body: str, click_url: str):
+    # 1. Standard ntfy Alert
     ntfy_topic = os.getenv("NTFY_TOPIC")
-    if not ntfy_topic:
-        print("[Alert Skipped]: NTFY_TOPIC secret is not set.")
-        return
+    if ntfy_topic:
+        try:
+            req = urllib.request.Request(
+                f"https://ntfy.sh/{ntfy_topic}",
+                data=body.encode("utf-8"),
+                headers={
+                    "Title": title,
+                    "Priority": "max",
+                    "Tags": "rotating_light,shopping_cart",
+                    "Click": click_url,
+                },
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as e:
+            print(f"[Alert Error - ntfy]: {e}")
 
-    try:
-        req = urllib.request.Request(
-            f"https://ntfy.sh/{ntfy_topic}",
-            data=body.encode("utf-8"),
-            headers={
-                "Title": title,
-                "Priority": "max",
-                "Tags": "rotating_light,shopping_cart",
-                "Click": click_url,
-            },
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=10)
-    except Exception as e:
-        print(f"[Alert Error - ntfy]: {e}")
+    # 2. Bark iOS Critical Alert (Overrides Hardware Silent Mode + Custom Sound)
+    bark_key = os.getenv("BARK_KEY", "").strip().strip("/")
+    if bark_key:
+        try:
+            payload = json.dumps({
+                "title": title,
+                "body": body,
+                "url": click_url,       # Opens 1-tap Shopify cart link in Safari
+                "level": "critical",    # Bypasses iPhone Silent Mode & Focus/DND
+                "volume": 8,            # Plays at 80% volume (scale 1-10)
+                "sound": "alarm",       # Change to bell, horn, minuet, telegraph, etc. if preferred
+                "group": "TCG Sniper",
+            }).encode("utf-8")
+            bark_req = urllib.request.Request(
+                f"https://api.day.app/{bark_key}",
+                data=payload,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                method="POST",
+            )
+            urllib.request.urlopen(bark_req, timeout=10)
+        except Exception as e:
+            print(f"[Alert Error - Bark]: {e}")
+
+    if not ntfy_topic and not bark_key:
+        print("[Alert Skipped]: Neither NTFY_TOPIC nor BARK_KEY is configured.")
 
 
 def check_shopify_stores(state: dict) -> bool:
@@ -316,8 +340,8 @@ def run_all_checks():
     if os.getenv("TEST_MODE") == "true":
         send_alert(
             "TEST: Dual Sniper Active (OP + PKMN)",
-            "Scanning 15 UK Stores every 60s (Split ETB Caps Active).\n1-Tap Test: https://www.bulwarkgames.co.uk",
-            "https://www.bulwarkgames.co.uk",
+            "Scanning 20 UK Stores every 60s (Bark Silent-Override Active).\n1-Tap Test: https://travellingman.com",
+            "https://travellingman.com",
         )
         print("Sent test alert successfully.")
         return
