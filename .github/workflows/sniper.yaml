@@ -42,6 +42,7 @@ jobs:
         env:
           TEST_MODE: ${{ github.event.inputs.test_mode }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
         run: python monitor.py
 
       - name: Commit updated stock state
