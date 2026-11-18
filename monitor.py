@@ -86,23 +86,30 @@ def save_state(state: dict):
     STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def has(text: str, tok: str) -> bool:
+    """Whole-word match, so 'tin' no longer matches inside 'Destined' and 'etb' not inside 'setback'."""
+    left = r"(?<![a-z0-9])" if tok[0].isalnum() else ""
+    right = r"(?![a-z0-9])" if tok[-1].isalnum() else ""
+    return re.search(left + re.escape(tok) + right, text) is not None
+
+
 def classify_match(product_title: str, variant_title: str, price: float) -> str | None:
     """Returns tag ('ONE PIECE', 'PKMN BOX', or 'PKMN ETB') if criteria met, else None."""
     full_title = f"{product_title} {variant_title}".lower()
-    if any(x in full_title for x in EXCLUDED_KEYWORDS):
+    if any(has(full_title, x) for x in EXCLUDED_KEYWORDS):
         return None
 
-    # 1. Check One Piece Booster Boxes (£75 - £125)
-    if OP_SET_PATTERN.search(full_title) and any(k in full_title for k in OP_REQUIRED):
+    # 1. Check One Piece Booster Boxes (£75 - £130)
+    if OP_SET_PATTERN.search(full_title) and any(has(full_title, k) for k in OP_REQUIRED):
         if OP_MIN_GBP <= price <= OP_MAX_GBP:
             return "ONE PIECE"
 
     # 2. Check Pokemon (Split by Booster Box vs ETB)
     if PKMN_SET_PATTERN.search(full_title):
-        if any(k in full_title for k in PKMN_BOX_KEYWORDS):
+        if any(has(full_title, k) for k in PKMN_BOX_KEYWORDS):
             if PKMN_BOX_MIN_GBP <= price <= PKMN_BOX_MAX_GBP:
                 return "PKMN BOX"
-        elif any(k in full_title for k in PKMN_ETB_KEYWORDS):
+        elif any(has(full_title, k) for k in PKMN_ETB_KEYWORDS):
             if PKMN_ETB_MIN_GBP <= price <= PKMN_ETB_MAX_GBP:
                 return "PKMN ETB"
 
@@ -114,15 +121,18 @@ def send_alert(title: str, body: str, click_url: str):
     ntfy_topic = os.getenv("NTFY_TOPIC")
     if ntfy_topic:
         try:
+            # JSON publish: headers are latin-1, so £ arrived garbled and emoji would crash.
             req = urllib.request.Request(
-                f"https://ntfy.sh/{ntfy_topic}",
-                data=body.encode("utf-8"),
-                headers={
-                    "Title": title,
-                    "Priority": "max",
-                    "Tags": "rotating_light,shopping_cart",
-                    "Click": click_url,
-                },
+                "https://ntfy.sh",
+                data=json.dumps({
+                    "topic": ntfy_topic,
+                    "title": title,
+                    "message": body,
+                    "priority": 5,
+                    "tags": ["rotating_light", "shopping_cart"],
+                    "click": click_url,
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=10)
@@ -219,20 +229,24 @@ def check_shopify_stores(state: dict) -> bool:
 def check_woo_stores(state: dict) -> bool:
     changed = False
     for store_name, base_url in WOO_STORES.items():
-        api_url = f"{base_url}/wp-json/wc/store/v1/products?search=One+Piece&per_page=50"
-        try:
-            resp = cffi_requests.get(api_url, impersonate="chrome124", timeout=15)
-            if resp.status_code != 200:
-                print(f"[{store_name}] Woo HTTP {resp.status_code}")
-                continue
-            products = resp.json()
-        except Exception as e:
-            print(f"[{store_name}] Woo fetch skipped: {e}")
-            continue
+        # Search both games (was One Piece only), de-duplicated by product id.
+        products_by_id = {}
+        for search in ("One+Piece", "Pokemon"):
+            api_url = f"{base_url}/wp-json/wc/store/v1/products?search={search}&per_page=50"
+            try:
+                resp = cffi_requests.get(api_url, impersonate="chrome124", timeout=15)
+                if resp.status_code != 200:
+                    print(f"[{store_name}] Woo HTTP {resp.status_code} ({search})")
+                    continue
+                for p in resp.json():
+                    products_by_id[p.get("id")] = p
+            except Exception as e:
+                print(f"[{store_name}] Woo fetch skipped ({search}): {e}")
+            time.sleep(random.uniform(0.8, 1.8))
 
-        for p in products:
+        for p in products_by_id.values():
             title = p.get("name", "")
-            v_id = f"woo_{p.get('id')}"
+            v_id = f"woo_{base_url}_{p.get('id')}"   # was woo_<id>: collided across both Woo shops
             is_available = bool(p.get("is_in_stock", False) and p.get("is_purchasable", False))
 
             price_info = p.get("prices", {})
