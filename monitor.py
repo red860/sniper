@@ -2,6 +2,7 @@ import json
 import os
 import random
 import re
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -18,7 +19,7 @@ OP_MAX_GBP = 130.00
 
 # --- 1B. POKEMON FILTER CONFIGURATION (Split Caps for ETBs vs Booster Boxes) ---
 PKMN_SET_PATTERN = re.compile(
-    r"\b(me[- ]?(0[5-9]|1\d)|sv[- ]?(08\.5|09|10)|30th celebration|delta reign|flowing fists|pitch black|chaos rising|perfect order|ascended heroes|prismatic evolutions|destined rivals|surging sparks)\b",
+    r"\b(me[- ]?(0?[5-9]|1\d)|sv[- ]?(08\.5|09|10)|30th celebration|delta reign|flowing fists|pitch black|chaos rising|perfect order|ascended heroes|prismatic evolutions|destined rivals|surging sparks)\b",
     re.IGNORECASE,
 )
 
@@ -71,6 +72,8 @@ CUSTOM_SEARCH_URLS = {
 }
 
 STATE_FILE = Path("state.json")
+SHOPIFY_MAX_PAGES = 4        # 4 x 250 products per Shopify store (was first 250 only)
+ALERT_AFTER_FAILURES = 6     # failed sweeps in a row before one "monitor blind" push
 
 
 def load_state() -> dict:
@@ -166,21 +169,90 @@ def send_alert(title: str, body: str, click_url: str):
         print("[Alert Skipped]: Neither NTFY_TOPIC nor BARK_KEY is configured.")
 
 
+def send_health(title: str, body: str):
+    """Low-priority push for a store that keeps failing (no critical Bark sound)."""
+    ntfy_topic = os.getenv("NTFY_TOPIC")
+    if ntfy_topic:
+        try:
+            req = urllib.request.Request(
+                "https://ntfy.sh",
+                data=json.dumps({"topic": ntfy_topic, "title": title, "message": body,
+                                 "priority": 2, "tags": ["warning"]}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as e:
+            print(f"[Health Error - ntfy]: {e}")
+    bark_key = os.getenv("BARK_KEY", "").strip().strip("/")
+    if bark_key:
+        try:
+            bark_req = urllib.request.Request(
+                f"https://api.day.app/{bark_key}",
+                data=json.dumps({"title": title, "body": body, "level": "passive",
+                                 "group": "TCG Sniper health"}).encode("utf-8"),
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                method="POST",
+            )
+            urllib.request.urlopen(bark_req, timeout=10)
+        except Exception as e:
+            print(f"[Health Error - Bark]: {e}")
+
+
+def note_failure(state: dict, store_name: str, reason: str) -> bool:
+    """Count consecutive failed sweeps. Never touches stock state. Pushes once at the threshold."""
+    health = state.setdefault("_health", {})
+    h = health.setdefault(store_name, {"fail_streak": 0, "warned": False})
+    h["fail_streak"] += 1
+    h["last_error"] = reason
+    if h["fail_streak"] >= ALERT_AFTER_FAILURES and not h["warned"]:
+        send_health(f"Monitor blind: {store_name}",
+                    f"{h['fail_streak']} failed checks in a row ({reason}). "
+                    "No restock alerts from this store until it recovers.")
+        h["warned"] = True
+    return True
+
+
+def note_success(state: dict, store_name: str) -> bool:
+    h = state.get("_health", {}).get(store_name)
+    if h and h["fail_streak"]:
+        if h.get("warned"):
+            print(f"[{store_name}] recovered after {h['fail_streak']} failed checks")
+        del state["_health"][store_name]
+        return True
+    return False
+
+
 def check_shopify_stores(state: dict) -> bool:
     changed = False
     for store_name, base_url in SHOPIFY_STORES.items():
-        api_url = f"{base_url}/products.json?limit=250"
-        try:
-            resp = cffi_requests.get(api_url, impersonate="chrome124", timeout=15)
-            if resp.status_code != 200:
-                print(f"[{store_name}] HTTP {resp.status_code}")
-                continue
-            data = resp.json()
-        except Exception as e:
-            print(f"[{store_name}] Fetch skipped: {e}")
-            continue
+        products = []
+        failed = None
+        for page in range(1, SHOPIFY_MAX_PAGES + 1):
+            api_url = f"{base_url}/products.json?limit=250&page={page}"
+            try:
+                resp = cffi_requests.get(api_url, impersonate="chrome124", timeout=15)
+                if resp.status_code != 200:
+                    failed = f"HTTP {resp.status_code}"
+                    break
+                batch = resp.json().get("products", [])
+            except Exception as e:
+                failed = f"{e}"[:120]
+                break
+            products += batch
+            if len(batch) < 250:
+                break
+            time.sleep(random.uniform(0.8, 1.8))
 
-        for product in data.get("products", []):
+        if failed and not products:
+            print(f"[{store_name}] {failed}")
+            changed |= note_failure(state, store_name, failed)
+            continue
+        if failed:   # a later page failed: still use what we got; unseen items are left alone
+            print(f"[{store_name}] partial ({failed} after {len(products)} products)")
+        changed |= note_success(state, store_name)
+
+        for product in products:
             p_title = product.get("title", "")
             handle = product.get("handle", "")
 
@@ -231,18 +303,26 @@ def check_woo_stores(state: dict) -> bool:
     for store_name, base_url in WOO_STORES.items():
         # Search both games (was One Piece only), de-duplicated by product id.
         products_by_id = {}
+        failed = None
         for search in ("One+Piece", "Pokemon"):
             api_url = f"{base_url}/wp-json/wc/store/v1/products?search={search}&per_page=50"
             try:
                 resp = cffi_requests.get(api_url, impersonate="chrome124", timeout=15)
                 if resp.status_code != 200:
                     print(f"[{store_name}] Woo HTTP {resp.status_code} ({search})")
+                    failed = f"HTTP {resp.status_code}"
                     continue
                 for p in resp.json():
                     products_by_id[p.get("id")] = p
             except Exception as e:
                 print(f"[{store_name}] Woo fetch skipped ({search}): {e}")
+                failed = f"{e}"[:120]
             time.sleep(random.uniform(0.8, 1.8))
+
+        if failed and not products_by_id:
+            changed |= note_failure(state, store_name, failed)
+        elif not failed:
+            changed |= note_success(state, store_name)
 
         for p in products_by_id.values():
             title = p.get("name", "")
@@ -294,11 +374,14 @@ def check_custom_stores(state: dict) -> bool:
             resp = cffi_requests.get(url, impersonate="chrome124", timeout=15)
             if resp.status_code != 200:
                 print(f"[{store_name}] Skipped (HTTP {resp.status_code})")
+                changed |= note_failure(state, store_name, f"HTTP {resp.status_code}")
                 continue
             html = resp.text
         except Exception as e:
             print(f"[{store_name}] Fetch error: {e}")
+            changed |= note_failure(state, store_name, f"{e}"[:120])
             continue
+        changed |= note_success(state, store_name)
 
         for match in ld_json_pattern.finditer(html):
             try:
@@ -351,6 +434,8 @@ def check_custom_stores(state: dict) -> bool:
 
 
 def run_all_checks():
+    # Print each log line as it happens (the Actions log showed nothing until the run ended).
+    sys.stdout.reconfigure(line_buffering=True)
     if os.getenv("TEST_MODE") == "true":
         send_alert(
             "TEST: Dual Sniper Active (OP + PKMN)",
