@@ -56,6 +56,10 @@ SHOPIFY_STORES = {
     "Obsidia TCG (8.8/10)": "https://obsidia-tcg.store",
     "Sports Cards Direct (8.5/10)": "https://www.sportscardsdirect.co.uk",
     "7th City Collectables (8.2/10)": "https://7thcitycollectables.com",
+    # Big shops: watch their One Piece collections, not the whole catalogue.
+    "Zatu - One Piece Boxes": "https://zatu.com/collections/booster-boxes-one-piece",
+    "Zatu - One Piece Pre-orders": "https://zatu.com/collections/pre-orders-one-piece",
+    "Total Cards - One Piece": "https://totalcards.net/collections/all-one-piece",
 }
 
 # --- 3. VERIFIED HIGH-TRUST WOOCOMMERCE STORES ---
@@ -226,6 +230,7 @@ def note_success(state: dict, store_name: str) -> bool:
 def check_shopify_stores(state: dict) -> bool:
     changed = False
     for store_name, base_url in SHOPIFY_STORES.items():
+        shop_root = re.match(r"https?://[^/]+", base_url).group(0)   # cart/product links need the domain only
         products = []
         failed = None
         for page in range(1, SHOPIFY_MAX_PAGES + 1):
@@ -273,9 +278,9 @@ def check_shopify_stores(state: dict) -> bool:
 
                 if is_available and game_tag:
                     if not was_available:
-                        cart_1x = f"{base_url}/cart/{v_id}:1"
-                        cart_2x = f"{base_url}/cart/{v_id}:2"
-                        product_page = f"{base_url}/products/{handle}"
+                        cart_1x = f"{shop_root}/cart/{v_id}:1"
+                        cart_2x = f"{shop_root}/cart/{v_id}:2"
+                        product_page = f"{shop_root}/products/{handle}"
 
                         full_name = f"{p_title} ({v_title})".strip(" ()")
                         alert_title = f"[{game_tag}] {store_name} - £{price:.2f}"
