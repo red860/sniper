@@ -5,48 +5,33 @@
   "65002043113849": false,
   "_health": {
     "Alchemists Workshops - Cheshire (9.1/10)": {
-      "fail_streak": 1719,
+      "fail_streak": 1729,
       "last_error": "HTTP 403",
       "warned": true
     },
     "Chaos Cards (9.6/10)": {
-      "fail_streak": 1719,
+      "fail_streak": 1729,
       "last_error": "HTTP 403",
       "warned": true
     },
     "Chief Cards (9.4/10)": {
-      "fail_streak": 1719,
+      "fail_streak": 1729,
       "last_error": "HTTP 403",
       "warned": true
     },
     "Game Summon (8.7/10)": {
-      "fail_streak": 1719,
+      "fail_streak": 1729,
       "last_error": "HTTP 403",
       "warned": true
     },
     "Magic Madhouse (9.5/10)": {
-      "fail_streak": 1719,
+      "fail_streak": 1729,
       "last_error": "HTTP 403",
       "warned": true
-    },
-    "Total Cards - One Piece": {
-      "fail_streak": 3,
-      "last_error": "HTTP 403",
-      "warned": false
     },
     "Unicorn Cards (8.4/10)": {
-      "fail_streak": 1719,
+      "fail_streak": 1729,
       "last_error": "HTTP 404",
-      "warned": true
-    },
-    "Zatu - One Piece Boxes": {
-      "fail_streak": 22,
-      "last_error": "HTTP 403",
-      "warned": true
-    },
-    "Zatu - One Piece Pre-orders": {
-      "fail_streak": 18,
-      "last_error": "HTTP 403",
       "warned": true
     }
   }
